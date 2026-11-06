@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import unittest
 from unittest.mock import patch
+from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app
@@ -47,6 +48,32 @@ class AgentLoopTests(unittest.TestCase):
     def test_successful_read_and_final_report(self):
         final = result()
         self.assertEqual(self.collect(self.read_messages()+[final]), final.result)
+
+    def test_student_progress_explains_read_and_completion_without_raw_details(self):
+        with redirect_stderr(io.StringIO()) as progress:
+            asyncio.run(app.collect_report(stream(self.read_messages()+[result()]), self.target))
+        text = progress.getvalue()
+        self.assertIn("[2/4 READ]", text)
+        self.assertIn("[3/4 ANALYZE]", text)
+        self.assertIn("[4/4 REPORT]", text)
+        self.assertNotIn("[TOOL CALL]", text)
+        self.assertNotIn("read-1", text)
+
+    def test_verbose_preserves_raw_tool_and_completion_details(self):
+        with redirect_stderr(io.StringIO()) as progress:
+            asyncio.run(app.collect_report(stream(self.read_messages()+[result()]),
+                                           self.target, verbose=True))
+        text = progress.getvalue()
+        self.assertIn("[TOOL CALL] Read", text)
+        self.assertIn("[TOOL RESULT] read-1: returned", text)
+        self.assertIn("[RUN] subtype=success", text)
+
+    def test_failed_run_does_not_announce_a_completed_report(self):
+        with redirect_stderr(io.StringIO()) as progress:
+            with self.assertRaises(RuntimeError):
+                asyncio.run(app.collect_report(
+                    stream(self.read_messages()+[result(is_error=True)]), self.target))
+        self.assertNotIn("[4/4 REPORT]", progress.getvalue())
 
     def test_relative_tool_path_matches_target(self):
         self.assertIn("operations", self.collect(self.read_messages(path="policy.txt")+[result()]))
@@ -109,9 +136,42 @@ class ApplicationTests(unittest.TestCase):
             args=[mode,"--dry-run"]
             if mode=="ask":
                 args += ["--question","Who owns escalations?"]
-            with self.subTest(mode=mode), redirect_stdout(io.StringIO()) as output:
+            with self.subTest(mode=mode), redirect_stdout(io.StringIO()) as output, \
+                    redirect_stderr(io.StringIO()) as progress:
                 self.assertEqual(app.main(args),0)
                 self.assertIn("Use Read",output.getvalue())
+                self.assertIn("Concept explained", output.getvalue())
+                self.assertIn("Preview only: no API call", progress.getvalue())
+                self.assertNotIn("[4/4 REPORT]", progress.getvalue())
+
+    def test_teaching_guide_stays_out_of_report_stdout_and_saved_file(self):
+        target = app.resolve_target("policy.txt", "ask")
+        report = "## 1. Findings\nThe operations team owns escalations."
+        messages = [
+            AssistantMessage(model="offline-test", content=[
+                ToolUseBlock(id="read-1", name="Read", input={"file_path": str(target)})]),
+            UserMessage(content=[ToolResultBlock(tool_use_id="read-1", content="Section 3")]),
+            result(result=report),
+        ]
+        directory = app.APP_DIR / f".test-output-{uuid4().hex}"
+        directory.mkdir()
+        destination = directory / "report.md"
+        try:
+            with patch("claude_agent_sdk.query", return_value=stream(messages)), \
+                    redirect_stdout(io.StringIO()) as output, \
+                    redirect_stderr(io.StringIO()) as progress:
+                status = app.main(["ask", "--question", "Who owns escalations?",
+                                   "--output", str(destination)])
+            self.assertEqual(status, 0, progress.getvalue())
+            self.assertEqual(output.getvalue(), report + "\n")
+            self.assertEqual(destination.read_text(encoding="utf-8"), report + "\n")
+            self.assertIn("[1/4 SCOPE]", progress.getvalue())
+            self.assertIn("[4/4 REPORT]", progress.getvalue())
+            self.assertIn("DISCUSS WITH YOUR STUDENTS", progress.getvalue())
+        finally:
+            if destination.exists():
+                destination.unlink()
+            directory.rmdir()
 
     def test_question_is_required_for_ask(self):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:

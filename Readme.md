@@ -13,7 +13,7 @@ Imagine joining a project with release notes, an unfamiliar Python script, sales
 | Explain Python using evidence | Identify functions and calls; distinguish definitions from invocation. |
 | Analyze CSV and JSON | Inspect structure, show supported totals, and keep null distinct from zero. |
 | Answer file-based questions | Cite sections and acknowledge when a file does not contain the answer. |
-| Observe the agent loop | Print tool requests, their matching results, and completion metadata. |
+| Observe the agent loop | Follow readable Scope, Read, Analyze, and Report messages; use `--verbose` for raw SDK details. |
 | Verify the outcome | Reject failed/incomplete runs and answers without an observed successful target-file read. |
 
 The assistant asks for citations and coverage information. Those instructions guide the model; they do not automatically validate every claim. You still compare the report with its source.
@@ -74,6 +74,45 @@ $env:CLAUDE_MODEL = "your-supported-model-id"
 ## Run the application
 
 Run these commands from this folder. Source paths are resolved relative to `sample_project`, regardless of the terminal's working directory.
+
+### Output designed for teaching
+
+Each run starts with a lesson topic, source file, learning goal, and key concept.
+The terminal then explains the workflow as the agent runs:
+
+```text
+[1/4 SCOPE] Source and task validated. Starting the agent...
+[2/4 READ] Agent requested policy.txt through the Read tool.
+[2/4 READ] Tool returned source text to the agent.
+[3/4 ANALYZE] Waiting for Claude's analysis of the retrieved text...
+[4/4 REPORT] Run completed in 2 agent turns.
+```
+
+This is an illustrative trace, not a live transcript. Read messages may repeat
+when the agent retrieves more text. The Analyze message indicates that the host
+is waiting for an answer after retrieval; it does not expose the model's internal
+reasoning. The completion message appears only after the host's run checks pass.
+
+The requested Markdown report has four sections:
+
+1. **Findings — What did we learn?** A direct answer, with a function table and
+   call flow for code, or fields and supported calculations for data.
+2. **Concept explained — Why does it matter?** A short beginner explanation with
+   a cited example from the source.
+3. **Evidence — Where can we check?** Source references for the main claims.
+4. **Limits — What do we still not know?** Coverage, inferences, and missing facts.
+
+These sections are model instructions, not a strict output-schema guarantee.
+After the report, a discussion question helps students check their understanding.
+The lesson guide and progress messages go to stderr; stdout and saved Markdown
+contain only the model's report. No additional formatting dependencies are needed.
+
+For a lesson about the SDK itself, include the raw tool calls, matching tool
+result IDs, and completion metadata:
+
+```powershell
+.\.venv\Scripts\python.exe app.py ask --question "Who owns escalations?" --verbose
+```
 
 ### 1. Preview a prompt without an API call
 
@@ -164,7 +203,7 @@ Anchoring paths to the script keeps behavior consistent when students launch the
 prompt = build_prompt("ask", target, "Who owns escalations?", "a project manager")
 ```
 
-The generated prompt asks for `Findings`, `Evidence`, and `Limits`. For summaries, it requests conditions and unfinished work. For code, it requests functions and calls. For data, it requests schema and supported calculations. This gives the model a concrete objective before it reads anything.
+The generated prompt asks for `Findings`, `Concept explained`, `Evidence`, and `Limits` in beginner-friendly language. For summaries, it requests conditions and unfinished work. For code, it requests a function table and numbered call flow. For data, it requests fields and supported calculations. The concept explanation uses a cited example from the source. This gives the model a concrete objective before it reads anything.
 
 The application does not paste the source into the prompt: the agent must request the file through `Read`. `SYSTEM_PROMPT` also tells it to treat file text as source material rather than task instructions.
 
@@ -211,7 +250,7 @@ elif isinstance(message, UserMessage) and isinstance(message.content, list):
 
 These comments and ellipses abbreviate the complete implementation in `app.py`. The application checks whether `UserMessage.content` is a list before iterating it. Matching IDs connect tool feedback to its request, and a failed read does not count as retrieved evidence. Printing a tool request observes it; the SDK executes the tool.
 
-The terminal shows `[TOOL CALL]`, `[TOOL RESULT]`, and `[RUN]` messages on standard error. The final report goes to standard output.
+The terminal explains each workflow step on standard error. With `--verbose`, it also shows `[TOOL CALL]`, `[TOOL RESULT]`, and `[RUN]` messages. The final report goes to standard output.
 
 ### Step 5: Check completion before accepting the answer
 
