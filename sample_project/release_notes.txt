@@ -1,0 +1,10 @@
+Release notes: customer portal
+
+[Decision]
+Friday launch approved, conditional on billing checks passing before release.
+
+[Owner]
+Ravi owns the billing checks.
+
+[Open issue]
+The rollback plan is still pending. No owner or completion date is specified.
